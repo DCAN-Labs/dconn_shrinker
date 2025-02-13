@@ -1,5 +1,6 @@
+
 import numpy as np
-import pandas as pd
+import os
 import time
 import h5py
 import nibabel as nb
@@ -9,29 +10,53 @@ from nilearn import connectome
 # Purpose: Load hdf5 file into dconn format
 # Last Updated: 4 Feb 2025
 
-dconn_dir = '/home/faird/shared/code/internal/utilities/dconn_shrinker/'
-hdf5_in =   f'{dconn_dir}sub-1003001_ses-2_task-restMENORDICtrimmed_space-fsLR_den-91k_desc-denoised_bold_FD_02_smoothed_2mm.h5'
-dconn_out = f'{dconn_dir}sub-1003001_ses-2_task-restMENORDICtrimmed_space-fsLR_den-91k_desc-denoised_bold_FD_02_smoothed_2mm.dconn.nii'
-dconn_ref = f'{dconn_dir}sub-1003001_ses-2_task-restMENORDICtrimmed_space-fsLR_den-91k_desc-denoised_bold_FD_02_smoothed_2mm_new.dconn.nii'
+def hdf5_to_dconn(hdf5_in, dconn_ref):
+    """
+    Converts an HDF5 file containing connectome data to a CIFTI-2 dense connectivity (dconn.nii) file,
+    using the header information from the reference dconn file.
 
-def hdf5_to_dconn(hdf5_in, dconn_out, dconn_ref):
+    Parameters:
+    hdf5_in (str): Path to the input HDF5 file.
+    dconn_ref (str): Path to a reference dconn file to copy header information from.
+            This should be ideally the exact type of dconn that you want reconstructed.
+    """
+
+    # Open the HDF5 file for reading
+    print('loading...')
     hdf5_file = h5py.File(hdf5_in,'r')
 
+    print(f'{hdf5_in}')
+
+    # Read the upper triangular part of the connectome matrix
     upper = hdf5_file["data"][0:len(hdf5_file["data"])]
 
-    diag_len = hdf5_file["n_grayordinates"][0]
+    # Get the info about diagonal
+    diag_len =   hdf5_file["n_grayordinates"][0]
+    diag_value = hdf5_file["diagonal_value"][0]
 
-    mat = connectome.vec_to_sym_matrix(upper, diagonal=np.repeat(hdf5_file["diagonal_value"][0],diag_len))
+    # Reconstruct the full symmetric matrix
+    print('reconstructing matrix...')
+    mat = connectome.vec_to_sym_matrix(upper, diagonal=np.repeat(np.nan,diag_len))
+    np.fill_diagonal(mat, diag_value)
 
+    # Convert the matrix to float32
     mat = mat.astype(np.float32)
 
+    # Load the reference dconn file to copy header information
     nii = nb.load(f'{dconn_ref}')
 
+    # Create a new CIFTI-2 image with the reconstructed matrix and the copied header information
+    file_out = os.path.splitext(hdf5_in)[0]
+    file_out = os.path.splitext(file_out)[0]
+    dconn_out = f'{file_out}_NEW.dconn.nii'
+
+    print('Saving...')
     new_img = nb.Cifti2Image(mat, header=nii.header,
                         nifti_header=nii.nifti_header)
     new_img.to_filename(f'{dconn_out}')
 
-    hdf5_file.close()
+    print(f'{dconn_out}')
 
+    # Close the HDF5 file
+    hdf5_file.close() # important to close the file!
 
-# exported dconn should look the same a the original
